@@ -7,7 +7,7 @@ import warnings
 import mxnet as mx
 from mxnet import autograd
 from mxnet.gluon import nn
-from mxnet.gluon.contrib.nn import SyncBatchNorm
+from mxnet.gluon.nn import SyncBatchNorm
 
 from .rcnn_target import MaskTargetGenerator
 from ..faster_rcnn import FasterRCNN
@@ -38,30 +38,29 @@ class Mask(nn.HybridBlock):
         self._batch_images = batch_images
         self.classes = classes
         init = mx.init.Xavier(rnd_type='gaussian', factor_type='out', magnitude=2)
-        with self.name_scope():
-            if num_fcn_convs > 0:
-                self.deconv = nn.HybridSequential()
-                for _ in range(num_fcn_convs):
-                    self.deconv.add(
-                        nn.Conv2D(mask_channels, kernel_size=(3, 3), strides=(1, 1),
-                                  padding=(1, 1), weight_initializer=init))
-                    if norm_layer is not None and norm_layer is SyncBatchNorm:
-                        self.deconv.add(norm_layer(**norm_kwargs))
-                    self.deconv.add(nn.Activation('relu'))
+        if num_fcn_convs > 0:
+            self.deconv = nn.HybridSequential()
+            for _ in range(num_fcn_convs):
                 self.deconv.add(
-                    nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
-                                       padding=(0, 0), weight_initializer=init))
+                    nn.Conv2D(mask_channels, kernel_size=(3, 3), strides=(1, 1),
+                                padding=(1, 1), weight_initializer=init))
                 if norm_layer is not None and norm_layer is SyncBatchNorm:
                     self.deconv.add(norm_layer(**norm_kwargs))
-            else:
-                # this is for compatibility of older models.
-                self.deconv = nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
-                                                 padding=(0, 0), weight_initializer=init)
-            self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
-                                  weight_initializer=init)
+                self.deconv.add(nn.Activation('relu'))
+            self.deconv.add(
+                nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
+                                    padding=(0, 0), weight_initializer=init))
+            if norm_layer is not None and norm_layer is SyncBatchNorm:
+                self.deconv.add(norm_layer(**norm_kwargs))
+        else:
+            # this is for compatibility of older models.
+            self.deconv = nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
+                                                padding=(0, 0), weight_initializer=init)
+        self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
+                                weight_initializer=init)
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Forward Mask Head.
 
         The behavior during training and inference is different.
@@ -78,7 +77,7 @@ class Mask(nn.HybridBlock):
 
         """
         # (B * N, mask_channels, MS, MS)
-        x = F.relu(self.deconv(x))
+        x = mx.nd.relu(self.deconv(x))
         # (B * N, C, MS, MS)
         x = self.mask(x)
         # (B * N, C, MS, MS) -> (B, N, C, MS, MS)
@@ -185,15 +184,14 @@ class MaskRCNN(FasterRCNN):
         if min(rpn_test_pre_nms, rpn_test_post_nms) < rcnn_max_dets:
             rcnn_max_dets = min(rpn_test_pre_nms, rpn_test_post_nms)
         self._rcnn_max_dets = rcnn_max_dets
-        with self.name_scope():
-            self.mask = Mask(self._batch_size, classes, mask_channels, num_fcn_convs=num_fcn_convs,
-                             norm_layer=norm_layer, norm_kwargs=norm_kwargs)
-            roi_size = (self._roi_size[0] * target_roi_scale, self._roi_size[1] * target_roi_scale)
-            self._target_roi_size = roi_size
-            self.mask_target = MaskTargetGenerator(
-                self._batch_size, self._num_sample, self.num_class, self._target_roi_size)
+        self.mask = Mask(self._batch_size, classes, mask_channels, num_fcn_convs=num_fcn_convs,
+                            norm_layer=norm_layer, norm_kwargs=norm_kwargs)
+        roi_size = (self._roi_size[0] * target_roi_scale, self._roi_size[1] * target_roi_scale)
+        self._target_roi_size = roi_size
+        self.mask_target = MaskTargetGenerator(
+            self._batch_size, self._num_sample, self.num_class, self._target_roi_size)
 
-    def hybrid_forward(self, F, x, gt_box=None, gt_label=None):
+    def forward(self, x, gt_box=None, gt_label=None):
         """Forward Mask RCNN network.
 
         The behavior during training and inference is different.
@@ -218,10 +216,10 @@ class MaskRCNN(FasterRCNN):
             cls_pred, box_pred, rpn_box, samples, matches, raw_rpn_score, raw_rpn_box, anchors, \
             cls_targets, box_targets, box_masks, top_feat, indices = \
                 super(MaskRCNN, self).hybrid_forward(F, x, gt_box, gt_label)
-            top_feat = F.reshape(top_feat.expand_dims(0), (self._batch_size, -1, 0, 0, 0))
-            top_feat = F.concat(
-                *[F.take(F.slice_axis(top_feat, axis=0, begin=i, end=i + 1).squeeze(),
-                         F.slice_axis(indices, axis=0, begin=i, end=i + 1).squeeze())
+            top_feat = mx.nd.reshape(top_feat.expand_dims(0), (self._batch_size, -1, 0, 0, 0))
+            top_feat = mx.nd.concat(
+                *[mx.nd.take(mx.nd.slice_axis(top_feat, axis=0, begin=i, end=i + 1).squeeze(),
+                         mx.nd.slice_axis(indices, axis=0, begin=i, end=i + 1).squeeze())
                   for i in range(self._batch_size)], dim=0)
             mask_pred = self.mask(top_feat)
 
@@ -234,21 +232,21 @@ class MaskRCNN(FasterRCNN):
 
             # (B, N * (C - 1), 1) -> (B, N * (C - 1)) -> (B, topk)
             num_rois = self._rcnn_max_dets
-            order = F.argsort(scores.squeeze(axis=-1), axis=1, is_ascend=False)
-            topk = F.slice_axis(order, axis=1, begin=0, end=num_rois)
+            order = mx.nd.argsort(scores.squeeze(axis=-1), axis=1, is_ascend=False)
+            topk = mx.nd.slice_axis(order, axis=1, begin=0, end=num_rois)
 
             # pick from (B, N * (C - 1), X) to (B * topk, X) -> (B, topk, X)
-            # roi_batch_id = F.arange(0, self._max_batch, repeat=num_rois)
-            roi_batch_id = F.arange(0, batch_size)
-            roi_batch_id = F.repeat(roi_batch_id, num_rois)
-            indices = F.stack(roi_batch_id, topk.reshape((-1,)), axis=0)
-            ids = F.gather_nd(ids, indices).reshape((-4, batch_size, num_rois, 1))
-            scores = F.gather_nd(scores, indices).reshape((-4, batch_size, num_rois, 1))
-            boxes = F.gather_nd(boxes, indices).reshape((-4, batch_size, num_rois, 4))
+            # roi_batch_id = mx.nd.arange(0, self._max_batch, repeat=num_rois)
+            roi_batch_id = mx.nd.arange(0, batch_size)
+            roi_batch_id = mx.nd.repeat(roi_batch_id, num_rois)
+            indices = mx.nd.stack(roi_batch_id, topk.reshape((-1,)), axis=0)
+            ids = mx.nd.gather_nd(ids, indices).reshape((-4, batch_size, num_rois, 1))
+            scores = mx.nd.gather_nd(scores, indices).reshape((-4, batch_size, num_rois, 1))
+            boxes = mx.nd.gather_nd(boxes, indices).reshape((-4, batch_size, num_rois, 4))
 
             # create batch id and reshape for roi pooling
-            padded_rois = F.concat(roi_batch_id.reshape((-1, 1)), boxes.reshape((-3, 0)), dim=-1)
-            padded_rois = F.stop_gradient(padded_rois)
+            padded_rois = mx.nd.concat(roi_batch_id.reshape((-1, 1)), boxes.reshape((-3, 0)), dim=-1)
+            padded_rois = mx.nd.stop_gradient(padded_rois)
 
             # pool to roi features
             if self.num_stages > 1:
@@ -257,10 +255,10 @@ class MaskRCNN(FasterRCNN):
                                                       self._strides, roi_mode=self._roi_mode)
             else:
                 if self._roi_mode == 'pool':
-                    pooled_feat = F.ROIPooling(
+                    pooled_feat = mx.nd.ROIPooling(
                         feat[0], padded_rois, self._roi_size, 1. / self._strides)
                 elif self._roi_mode == 'align':
-                    pooled_feat = F.contrib.ROIAlign(
+                    pooled_feat = mx.nd.contrib.ROIAlign(
                         feat[0], padded_rois, self._roi_size, 1. / self._strides, sample_ratio=2)
                 else:
                     raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
@@ -273,22 +271,22 @@ class MaskRCNN(FasterRCNN):
             # (B, N, C, pooled_size * 2, pooled_size * 2)
             rcnn_mask = self.mask(top_feat)
             # index the B dimension (B * N,)
-            # batch_ids = F.arange(0, self._max_batch, repeat=num_rois)
-            batch_ids = F.arange(0, batch_size)
-            batch_ids = F.repeat(batch_ids, num_rois)
+            # batch_ids = mx.nd.arange(0, self._max_batch, repeat=num_rois)
+            batch_ids = mx.nd.arange(0, batch_size)
+            batch_ids = mx.nd.repeat(batch_ids, num_rois)
             # index the N dimension (B * N,)
-            roi_ids = F.tile(F.arange(0, num_rois), reps=batch_size)
+            roi_ids = mx.nd.tile(mx.nd.arange(0, num_rois), reps=batch_size)
             # index the C dimension (B * N,)
             class_ids = ids.reshape((-1,))
             # clip to 0 to max class
-            class_ids = F.clip(class_ids, 0, self.num_class)
+            class_ids = mx.nd.clip(class_ids, 0, self.num_class)
             # pick from (B, N, C, PS*2, PS*2) -> (B * N, PS*2, PS*2)
-            indices = F.stack(batch_ids, roi_ids, class_ids, axis=0)
-            masks = F.gather_nd(rcnn_mask, indices)
+            indices = mx.nd.stack(batch_ids, roi_ids, class_ids, axis=0)
+            masks = mx.nd.gather_nd(rcnn_mask, indices)
             # (B * N, PS*2, PS*2) -> (B, N, PS*2, PS*2)
             masks = masks.reshape((-4, batch_size, num_rois, 0, 0))
             # output prob
-            masks = F.sigmoid(masks)
+            masks = mx.nd.sigmoid(masks)
 
             # ids (B, N, 1), scores (B, N, 1), boxes (B, N, 4), masks (B, N, PS*2, PS*2)
             return ids, scores, boxes, masks

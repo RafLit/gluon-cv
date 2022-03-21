@@ -9,6 +9,7 @@ from __future__ import absolute_import
 import numpy as np
 from mxnet import gluon
 from mxnet import nd
+import mxnet as mx
 
 from .bbox import BBoxCornerToCenter, NumPyBBoxCornerToCenter
 
@@ -275,30 +276,30 @@ class NormalizedBoxCenterDecoder(gluon.HybridBlock):
         self._format = 'corner' if convert_anchor else 'center'
         self._minimal_opset = minimal_opset
 
-    def hybrid_forward(self, F, x, anchors):
+    def forward(self, x, anchors):
         if not self._minimal_opset and 'box_decode' in F.contrib.__dict__:
-            x, anchors = F.amp_multicast(x, anchors, num_outputs=2, cast_narrow=True)
+            x, anchors = mx.nd.amp_multicast(x, anchors, num_outputs=2, cast_narrow=True)
             if self._clip is None:
                 self._clip = -1  # match the signature of c++ operator
-            return F.contrib.box_decode(x, anchors, self._stds[0], self._stds[1], self._stds[2],
+            return mx.nd.contrib.box_decode(x, anchors, self._stds[0], self._stds[1], self._stds[2],
                                         self._stds[3], clip=self._clip, format=self._format)
         if self.corner_to_center is not None:
             a = self.corner_to_center(anchors)
         else:
             a = anchors.split(axis=-1, num_outputs=4)
-        p = F.split(x, axis=-1, num_outputs=4)
-        ox = F.broadcast_add(F.broadcast_mul(p[0] * self._stds[0], a[2]), a[0])
-        oy = F.broadcast_add(F.broadcast_mul(p[1] * self._stds[1], a[3]), a[1])
+        p = mx.nd.split(x, axis=-1, num_outputs=4)
+        ox = mx.nd.broadcast_add(mx.nd.broadcast_mul(p[0] * self._stds[0], a[2]), a[0])
+        oy = mx.nd.broadcast_add(mx.nd.broadcast_mul(p[1] * self._stds[1], a[3]), a[1])
         dw = p[2] * self._stds[2]
         dh = p[3] * self._stds[3]
         if self._clip:
-            dw = F.minimum(dw, self._clip)
-            dh = F.minimum(dh, self._clip)
-        dw = F.exp(dw)
-        dh = F.exp(dh)
-        ow = F.broadcast_mul(dw, a[2]) * 0.5
-        oh = F.broadcast_mul(dh, a[3]) * 0.5
-        return F.concat(ox - ow, oy - oh, ox + ow, oy + oh, dim=-1)
+            dw = mx.nd.minimum(dw, self._clip)
+            dh = mx.nd.minimum(dh, self._clip)
+        dw = mx.nd.exp(dw)
+        dh = mx.nd.exp(dh)
+        ow = mx.nd.broadcast_mul(dw, a[2]) * 0.5
+        oh = mx.nd.broadcast_mul(dh, a[3]) * 0.5
+        return mx.nd.concat(ox - ow, oy - oh, ox + ow, oy + oh, dim=-1)
 
 
 class MultiClassEncoder(gluon.HybridBlock):
@@ -413,14 +414,14 @@ class MultiPerClassDecoder(gluon.HybridBlock):
         self._axis = axis
         self._thresh = thresh
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         scores = x.slice_axis(axis=self._axis, begin=1, end=None)  # b x N x fg_class
-        template = F.zeros_like(x.slice_axis(axis=-1, begin=0, end=1))
-        cls_id = F.broadcast_add(template,
-                                 F.reshape(F.arange(self._fg_class), shape=(1, 1, self._fg_class)))
+        template = mx.nd.zeros_like(x.slice_axis(axis=-1, begin=0, end=1))
+        cls_id = mx.nd.broadcast_add(template,
+                                 mx.nd.reshape(mx.nd.arange(self._fg_class), shape=(1, 1, self._fg_class)))
         mask = scores > self._thresh
-        cls_id = F.where(mask, cls_id, F.ones_like(cls_id) * -1)
-        scores = F.where(mask, scores, F.zeros_like(scores))
+        cls_id = mx.nd.where(mask, cls_id, mx.nd.ones_like(cls_id) * -1)
+        scores = mx.nd.where(mask, scores, mx.nd.zeros_like(scores))
         return cls_id, scores
 
 

@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 from mxnet import autograd
 from mxnet import gluon
+import mxnet as mx
 
 from ....nn.coder import MultiClassEncoder, NormalizedPerClassBoxCenterEncoder
 
@@ -40,7 +41,7 @@ class RCNNTargetSampler(gluon.HybridBlock):
         self._max_num_gt = max_num_gt
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, rois, scores, gt_boxes):
+    def forward(self, rois, scores, gt_boxes):
         """Handle B=self._num_image by a for loop.
 
         Parameters
@@ -62,81 +63,81 @@ class RCNNTargetSampler(gluon.HybridBlock):
             new_samples = []
             new_matches = []
             for i in range(self._num_image):
-                roi = F.squeeze(F.slice_axis(rois, axis=0, begin=i, end=i + 1), axis=0)
-                score = F.squeeze(F.slice_axis(scores, axis=0, begin=i, end=i + 1), axis=0)
-                gt_box = F.squeeze(F.slice_axis(gt_boxes, axis=0, begin=i, end=i + 1), axis=0)
-                gt_score = F.sign(F.sum(gt_box, axis=-1, keepdims=True) + 1)
+                roi = mx.nd.squeeze(mx.nd.slice_axis(rois, axis=0, begin=i, end=i + 1), axis=0)
+                score = mx.nd.squeeze(mx.nd.slice_axis(scores, axis=0, begin=i, end=i + 1), axis=0)
+                gt_box = mx.nd.squeeze(mx.nd.slice_axis(gt_boxes, axis=0, begin=i, end=i + 1), axis=0)
+                gt_score = mx.nd.sign(mx.nd.sum(gt_box, axis=-1, keepdims=True) + 1)
 
                 # concat rpn roi with ground truth. mix gt with generated boxes.
-                all_roi = F.concat(roi, gt_box, dim=0)
-                all_score = F.concat(score, gt_score, dim=0).squeeze(axis=-1)
+                all_roi = mx.nd.concat(roi, gt_box, dim=0)
+                all_score = mx.nd.concat(score, gt_score, dim=0).squeeze(axis=-1)
                 # calculate (N, M) ious between (N, 4) anchors and (M, 4) bbox ground-truths
                 # cannot do batch op, will get (B, N, B, M) ious
-                ious = F.contrib.box_iou(all_roi, gt_box, format='corner')
+                ious = mx.nd.contrib.box_iou(all_roi, gt_box, format='corner')
                 # match to argmax iou
                 ious_max = ious.max(axis=-1)
                 ious_argmax = ious.argmax(axis=-1)
                 # init with 2, which are neg samples
-                mask = F.ones_like(ious_max) * 2
+                mask = mx.nd.ones_like(ious_max) * 2
                 # mark all ignore to 0
-                mask = F.where(all_score < 0, F.zeros_like(mask), mask)
+                mask = mx.nd.where(all_score < 0, mx.nd.zeros_like(mask), mask)
                 # mark positive samples with 3
                 pos_mask = ious_max >= self._pos_iou_thresh
-                mask = F.where(pos_mask, F.ones_like(mask) * 3, mask)
+                mask = mx.nd.where(pos_mask, mx.nd.ones_like(mask) * 3, mask)
 
                 # shuffle mask
-                rand = F.random.uniform(0, 1, shape=(self._num_proposal + self._max_num_gt,))
-                rand = F.slice_like(rand, ious_argmax)
-                index = F.argsort(rand)
-                mask = F.take(mask, index)
-                ious_argmax = F.take(ious_argmax, index)
+                rand = mx.nd.random.uniform(0, 1, shape=(self._num_proposal + self._max_num_gt,))
+                rand = mx.nd.slice_like(rand, ious_argmax)
+                index = mx.nd.argsort(rand)
+                mask = mx.nd.take(mask, index)
+                ious_argmax = mx.nd.take(ious_argmax, index)
 
                 # sample pos samples
-                order = F.argsort(mask, is_ascend=False)
-                topk = F.slice_axis(order, axis=0, begin=0, end=self._max_pos)
-                topk_indices = F.take(index, topk)
-                topk_samples = F.take(mask, topk)
-                topk_matches = F.take(ious_argmax, topk)
+                order = mx.nd.argsort(mask, is_ascend=mx.nd.lse)
+                topk = mx.nd.slice_axis(order, axis=0, begin=0, end=self._max_pos)
+                topk_indices = mx.nd.take(index, topk)
+                topk_samples = mx.nd.take(mask, topk)
+                topk_matches = mx.nd.take(ious_argmax, topk)
                 # reset output: 3 pos 2 neg 0 ignore -> 1 pos -1 neg 0 ignore
-                topk_samples = F.where(topk_samples == 3,
-                                       F.ones_like(topk_samples), topk_samples)
-                topk_samples = F.where(topk_samples == 2,
-                                       F.ones_like(topk_samples) * -1, topk_samples)
+                topk_samples = mx.nd.where(topk_samples == 3,
+                                       mx.nd.ones_like(topk_samples), topk_samples)
+                topk_samples = mx.nd.where(topk_samples == 2,
+                                       mx.nd.ones_like(topk_samples) * -1, topk_samples)
 
                 # sample neg samples
-                index = F.slice_axis(index, axis=0, begin=self._max_pos, end=None)
-                mask = F.slice_axis(mask, axis=0, begin=self._max_pos, end=None)
-                ious_argmax = F.slice_axis(ious_argmax, axis=0, begin=self._max_pos, end=None)
+                index = mx.nd.slice_axis(index, axis=0, begin=self._max_pos, end=None)
+                mask = mx.nd.slice_axis(mask, axis=0, begin=self._max_pos, end=None)
+                ious_argmax = mx.nd.slice_axis(ious_argmax, axis=0, begin=self._max_pos, end=None)
                 # change mask: 4 neg 3 pos 0 ignore
-                mask = F.where(mask == 2, F.ones_like(mask) * 4, mask)
-                order = F.argsort(mask, is_ascend=False)
+                mask = mx.nd.where(mask == 2, mx.nd.ones_like(mask) * 4, mask)
+                order = mx.nd.argsort(mask, is_ascend=mx.nd.lse)
                 num_neg = self._num_sample - self._max_pos
-                bottomk = F.slice_axis(order, axis=0, begin=0, end=num_neg)
-                bottomk_indices = F.take(index, bottomk)
-                bottomk_samples = F.take(mask, bottomk)
-                bottomk_matches = F.take(ious_argmax, bottomk)
+                bottomk = mx.nd.slice_axis(order, axis=0, begin=0, end=num_neg)
+                bottomk_indices = mx.nd.take(index, bottomk)
+                bottomk_samples = mx.nd.take(mask, bottomk)
+                bottomk_matches = mx.nd.take(ious_argmax, bottomk)
                 # reset output: 4 neg 3 pos 0 ignore -> 1 pos -1 neg 0 ignore
-                bottomk_samples = F.where(bottomk_samples == 3,
-                                          F.ones_like(bottomk_samples), bottomk_samples)
-                bottomk_samples = F.where(bottomk_samples == 4,
-                                          F.ones_like(bottomk_samples) * -1, bottomk_samples)
+                bottomk_samples = mx.nd.where(bottomk_samples == 3,
+                                          mx.nd.ones_like(bottomk_samples), bottomk_samples)
+                bottomk_samples = mx.nd.where(bottomk_samples == 4,
+                                          mx.nd.ones_like(bottomk_samples) * -1, bottomk_samples)
 
                 # output
-                indices = F.concat(topk_indices, bottomk_indices, dim=0)
-                samples = F.concat(topk_samples, bottomk_samples, dim=0)
-                matches = F.concat(topk_matches, bottomk_matches, dim=0)
+                indices = mx.nd.concat(topk_indices, bottomk_indices, dim=0)
+                samples = mx.nd.concat(topk_samples, bottomk_samples, dim=0)
+                matches = mx.nd.concat(topk_matches, bottomk_matches, dim=0)
 
                 sampled_rois = all_roi.take(indices)
-                x1, y1, x2, y2 = F.split(sampled_rois, axis=-1, num_outputs=4, squeeze_axis=True)
+                x1, y1, x2, y2 = mx.nd.split(sampled_rois, axis=-1, num_outputs=4, squeeze_axis=True)
                 rois_area = (x2 - x1) * (y2 - y1)
-                ind = F.argsort(rois_area)
+                ind = mx.nd.argsort(rois_area)
                 new_rois.append(sampled_rois.take(ind))
                 new_samples.append(samples.take(ind))
                 new_matches.append(matches.take(ind))
             # stack all samples together
-            new_rois = F.stack(*new_rois, axis=0)
-            new_samples = F.stack(*new_samples, axis=0)
-            new_matches = F.stack(*new_matches, axis=0)
+            new_rois = mx.nd.stack(*new_rois, axis=0)
+            new_samples = mx.nd.stack(*new_samples, axis=0)
+            new_matches = mx.nd.stack(*new_matches, axis=0)
         return new_rois, new_samples, new_matches
 
 

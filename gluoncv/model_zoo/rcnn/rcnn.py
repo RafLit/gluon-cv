@@ -94,16 +94,15 @@ class RCNN(gluon.HybridBlock):
         self._roi_size = roi_size
         self._strides = strides
 
-        with self.name_scope():
-            self.features = features
-            self.top_features = top_features
-            self.box_features = box_features
-            self.class_predictor = nn.Dense(
-                self.num_class + 1, weight_initializer=mx.init.Normal(0.01))
-            self.box_predictor = nn.Dense(
-                self.num_class * 4, weight_initializer=mx.init.Normal(0.001))
-            self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
-            self.box_decoder = NormalizedBoxCenterDecoder(clip=clip, convert_anchor=True)
+        self.features = features
+        self.top_features = top_features
+        self.box_features = box_features
+        self.class_predictor = nn.Dense(
+            self.num_class + 1, weight_initializer=mx.init.Normal(0.01))
+        self.box_predictor = nn.Dense(
+            self.num_class * 4, weight_initializer=mx.init.Normal(0.001))
+        self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
+        self.box_decoder = NormalizedBoxCenterDecoder(clip=clip, convert_anchor=True)
 
     def collect_train_params(self, select=None):
         """Collect trainable params.
@@ -256,7 +255,7 @@ class RCNN(gluon.HybridBlock):
                         new_params.set_data(new_data)
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x, width, height):
+    def forward(self, x, width, height):
         """Not implemented yet."""
         raise NotImplementedError
 

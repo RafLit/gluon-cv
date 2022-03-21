@@ -4,6 +4,7 @@ from __future__ import absolute_import
 
 import numpy as np
 from mxnet import gluon
+import mxnet as mx
 
 
 class NumPyBBoxCornerToCenter(object):
@@ -64,9 +65,9 @@ class BBoxCornerToCenter(gluon.HybridBlock):
         self._split = split
         self._axis = axis
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Hybrid forward"""
-        xmin, ymin, xmax, ymax = F.split(x, axis=self._axis, num_outputs=4)
+        xmin, ymin, xmax, ymax = mx.nd.split(x, axis=self._axis, num_outputs=4)
         # note that we do not have +1 here since our nms and box iou does not.
         # this is different that detectron.
         width = xmax - xmin
@@ -74,7 +75,7 @@ class BBoxCornerToCenter(gluon.HybridBlock):
         x = xmin + width * 0.5
         y = ymin + height * 0.5
         if not self._split:
-            return F.concat(x, y, width, height, dim=self._axis)
+            return mx.nd.concat(x, y, width, height, dim=self._axis)
         else:
             return x, y, width, height
 
@@ -250,7 +251,7 @@ class BBoxClipToImage(gluon.HybridBlock):
     def __init__(self, **kwargs):
         super(BBoxClipToImage, self).__init__(**kwargs)
 
-    def hybrid_forward(self, F, x, img):
+    def forward(self, x, img):
         """If images are padded, must have additional inputs for clipping
 
         Parameters
@@ -263,8 +264,8 @@ class BBoxClipToImage(gluon.HybridBlock):
         (B, N, 4) Bounding box coordinates.
 
         """
-        x = F.maximum(x, 0.0)
+        x = mx.nd.maximum(x, 0.0)
         # window [B, 2] -> reverse hw -> tile [B, 4] -> [B, 1, 4], boxes [B, N, 4]
-        window = F.shape_array(img).slice_axis(axis=0, begin=2, end=None).expand_dims(0)
-        m = F.tile(F.reverse(window, axis=1), reps=(2,)).reshape((0, -4, 1, -1))
-        return F.broadcast_minimum(x, F.cast(m, dtype='float32'))
+        window = mx.nd.shape_array(img).slice_axis(axis=0, begin=2, end=None).expand_dims(0)
+        m = mx.nd.tile(mx.nd.reverse(window, axis=1), reps=(2,)).reshape((0, -4, 1, -1))
+        return mx.nd.broadcast_minimum(x, mx.nd.cast(m, dtype='float32'))

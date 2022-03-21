@@ -14,7 +14,7 @@ from .densenet import *
 # from .fcn import *
 from .googlenet import *
 # from .inception import *
-# from .rcnn.mask_rcnn import *
+from .rcnn.mask_rcnn import *
 from .mobilenet import *
 from .mobilenetv3 import *
 # from .nasnet import *
@@ -146,7 +146,7 @@ _models = {
     # 'faster_rcnn_resnet101_v1d_custom': faster_rcnn_resnet101_v1d_custom,
     # 'faster_rcnn_fpn_syncbn_resnest269_coco': faster_rcnn_fpn_syncbn_resnest269_coco,
     # 'custom_faster_rcnn_fpn': custom_faster_rcnn_fpn,
-    # 'mask_rcnn_resnet50_v1b_coco': mask_rcnn_resnet50_v1b_coco,
+    'mask_rcnn_resnet50_v1b_coco': mask_rcnn_resnet50_v1b_coco,
     # 'mask_rcnn_fpn_resnet50_v1b_coco': mask_rcnn_fpn_resnet50_v1b_coco,
     # 'mask_rcnn_resnet101_v1d_coco': mask_rcnn_resnet101_v1d_coco,
     # 'mask_rcnn_fpn_resnet101_v1d_coco': mask_rcnn_fpn_resnet101_v1d_coco,

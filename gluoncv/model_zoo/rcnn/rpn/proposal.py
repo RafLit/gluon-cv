@@ -36,7 +36,7 @@ class RPNProposal(gluon.HybridBlock):
         self._min_size = min_size
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, anchor, score, bbox_pred, img):
+    def forward(self, anchor, score, bbox_pred, img):
         """
         Generate proposals.
         """
@@ -45,7 +45,7 @@ class RPNProposal(gluon.HybridBlock):
             roi = self._box_decoder(bbox_pred, anchor)
 
             # clip rois to image's boundary
-            # roi = F.Custom(roi, img, op_type='bbox_clip_to_image')
+            # roi = mx.nd.Custom(roi, img, op_type='bbox_clip_to_image')
             roi = self._clipper(roi, img)
 
             # remove bounding boxes that don't meet the min_size constraint
@@ -60,18 +60,18 @@ class RPNProposal(gluon.HybridBlock):
             invalid = (width < self._min_size) + (height < self._min_size)
 
             # # remove out of bound anchors
-            # axmin, aymin, axmax, aymax = F.split(anchor, axis=-1, num_outputs=4)
+            # axmin, aymin, axmax, aymax = mx.nd.split(anchor, axis=-1, num_outputs=4)
             # # it's a bit tricky to get right/bottom boundary in hybridblock
-            # wrange = F.arange(0, 2560).reshape((1, 1, 1, 2560)).slice_like(
+            # wrange = mx.nd.arange(0, 2560).reshape((1, 1, 1, 2560)).slice_like(
             #    img, axes=(3)).max().reshape((1, 1, 1))
-            # hrange = F.arange(0, 2560).reshape((1, 1, 2560, 1)).slice_like(
+            # hrange = mx.nd.arange(0, 2560).reshape((1, 1, 2560, 1)).slice_like(
             #    img, axes=(2)).max().reshape((1, 1, 1))
-            # invalid = (axmin < 0) + (aymin < 0) + F.broadcast_greater(axmax, wrange) + \
-            #    F.broadcast_greater(aymax, hrange)
+            # invalid = (axmin < 0) + (aymin < 0) + mx.nd.broadcast_greater(axmax, wrange) + \
+            #    mx.nd.broadcast_greater(aymax, hrange)
             # avoid invalid anchors suppress anchors with 0 confidence
-            score = F.where(invalid, F.ones_like(invalid) * -1, score)
-            invalid = F.broadcast_axes(invalid, axis=2, size=4)
-            roi = F.where(invalid, F.ones_like(invalid) * -1, roi)
+            score = mx.nd.where(invalid, mx.nd.ones_like(invalid) * -1, score)
+            invalid = mx.nd.broadcast_axes(invalid, axis=2, size=4)
+            roi = mx.nd.where(invalid, mx.nd.ones_like(invalid) * -1, roi)
 
-            pre = F.concat(score, roi, dim=-1)
+            pre = mx.nd.concat(score, roi, dim=-1)
             return pre

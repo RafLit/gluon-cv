@@ -1,6 +1,7 @@
 """Mask Target Generator."""
 from __future__ import absolute_import
 
+import mxnet as mx
 from mxnet import gluon, autograd
 
 
@@ -28,7 +29,7 @@ class MaskTargetGenerator(gluon.HybridBlock):
         self._mask_size = mask_size
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, rois, gt_masks, matches, cls_targets):
+    def forward(self, rois, gt_masks, matches, cls_targets):
         """Handle B=self._num_image by a for loop.
         There is no way to know number of gt_masks.
 
@@ -49,7 +50,7 @@ class MaskTargetGenerator(gluon.HybridBlock):
 
         # cannot know M (num_gt) to have accurate batch id B * M, must split batch dim
         def _split(x, axis, num_outputs, squeeze_axis):
-            x = F.split(x, axis=axis, num_outputs=num_outputs, squeeze_axis=squeeze_axis)
+            x = mx.nd.split(x, axis=axis, num_outputs=num_outputs, squeeze_axis=squeeze_axis)
             if isinstance(x, list):
                 return x
             elif self._num_images > 1:
