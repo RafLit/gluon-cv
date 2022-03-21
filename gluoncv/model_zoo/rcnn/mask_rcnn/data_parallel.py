@@ -2,7 +2,7 @@
 
 import mxnet as mx
 from mxnet import autograd
-from mxnet.contrib import amp
+from mxnet import amp
 
 from gluoncv.utils.parallel import Parallelizable
 

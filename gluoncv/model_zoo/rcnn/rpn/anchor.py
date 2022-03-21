@@ -1,8 +1,10 @@
 """RPN anchors."""
 from __future__ import absolute_import
 
+import mxnet as mx
 import numpy as np
 from mxnet import gluon
+from mxnet.gluon.parameter import Parameter, Constant
 
 
 class RPNAnchorGenerator(gluon.HybridBlock):
@@ -46,7 +48,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
 
         anchors = self._generate_anchors(stride, base_size, ratios, scales, alloc_size)
         self._num_depth = len(ratios) * len(scales)
-        self.anchors = self.params.get_constant('anchor_', anchors)
+        self.anchors = Constant(anchors)
 
     @property
     def num_depth(self):
@@ -69,11 +71,13 @@ class RPNAnchorGenerator(gluon.HybridBlock):
                             offset_x.ravel(), offset_y.ravel()), axis=1)
         # broadcast_add (1, N, 4) + (M, 1, 4)
         anchors = (base_sizes.reshape((1, -1, 4)) + offsets.reshape((-1, 1, 4)))
+        #print(type(anchors))
         anchors = anchors.reshape((1, 1, height, width, -1)).astype(np.float32)
+        #print(type(anchors))
         return anchors
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x, anchors):
+    def forward(self, x):
         """Slice anchors given the input image shape.
 
         Inputs:
@@ -82,7 +86,9 @@ class RPNAnchorGenerator(gluon.HybridBlock):
             - **out**: output anchor with (1, N, 4) shape. N is the number of anchors.
 
         """
-        a = F.slice_like(anchors, x, axes=(2, 3))
+        anchors = self.anchors.data(ctx=x.context)
+        a = mx.nd.slice_like(anchors.as_nd_ndarray(), x.as_nd_ndarray(), axes=(2, 3))
+        a = a.as_np_ndarray()
         return a.reshape((1, -1, 4))
 
 

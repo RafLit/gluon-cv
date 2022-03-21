@@ -53,7 +53,7 @@ class CAM_Module(HybridBlock):
         super(CAM_Module, self).__init__()
         self.chanel_in = in_dim
 
-        self.gamma = self.params.get('gamma', shape=(1,), init=mx.init.Zero())
+        self.gamma = Parameter('gamma', shape=(1,), init=mx.init.Zero())
 
     def hybrid_forward(self, F, x, **kwargs):
         """

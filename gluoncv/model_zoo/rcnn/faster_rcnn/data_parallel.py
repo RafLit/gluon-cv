@@ -1,7 +1,7 @@
 """Data parallel task for Faster RCNN Model."""
 
 from mxnet import autograd
-from mxnet.contrib import amp
+from mxnet import amp
 
 from gluoncv.utils.parallel import Parallelizable
 

@@ -75,34 +75,33 @@ class RPN(gluon.HybridBlock):
         self._test_pre_nms = max(1, test_pre_nms)
         self._test_post_nms = max(1, test_post_nms)
         num_stages = len(scales)
-        with self.name_scope():
-            if self._multi_level:
-                asz = alloc_size
-                self.anchor_generator = nn.HybridSequential()
-                for _, st, s in zip(range(num_stages), strides, scales):
-                    stage_anchor_generator = RPNAnchorGenerator(st, base_size, ratios, s, asz)
-                    self.anchor_generator.add(stage_anchor_generator)
-                    asz = max(asz[0] // 2, 16)
-                    asz = (asz, asz)  # For FPN, We use large anchor presets
-                anchor_depth = self.anchor_generator[0].num_depth
-                self.rpn_head = RPNHead(channels, anchor_depth)
-            else:
-                self.anchor_generator = RPNAnchorGenerator(
-                    strides, base_size, ratios, scales, alloc_size)
-                anchor_depth = self.anchor_generator.num_depth
-                # not using RPNHead to keep backward compatibility with old models
-                weight_initializer = mx.init.Normal(0.01)
-                self.conv1 = nn.HybridSequential()
-                self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
-                               nn.Activation('relu'))
-                self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
-                self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0,
-                                     weight_initializer=weight_initializer)
+        if self._multi_level:
+            asz = alloc_size
+            self.anchor_generator = nn.HybridSequential()
+            for _, st, s in zip(range(num_stages), strides, scales):
+                stage_anchor_generator = RPNAnchorGenerator(st, base_size, ratios, s, asz)
+                self.anchor_generator.add(stage_anchor_generator)
+                asz = max(asz[0] // 2, 16)
+                asz = (asz, asz)  # For FPN, We use large anchor presets
+            anchor_depth = self.anchor_generator[0].num_depth
+            self.rpn_head = RPNHead(channels, anchor_depth)
+        else:
+            self.anchor_generator = RPNAnchorGenerator(
+                strides, base_size, ratios, scales, alloc_size)
+            anchor_depth = self.anchor_generator.num_depth
+            # not using RPNHead to keep backward compatibility with old models
+            weight_initializer = mx.init.Normal(0.01)
+            self.conv1 = nn.HybridSequential()
+            self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
+                           nn.Activation('relu'))
+            self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
+            self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0,
+                                 weight_initializer=weight_initializer)
 
-            self.region_proposer = RPNProposal(clip, min_size, stds=(1., 1., 1., 1.))
+        self.region_proposer = RPNProposal(clip, min_size, stds=(1., 1., 1., 1.))
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, img, *x):
+    def forward(self, img, *x):
         """Forward RPN.
 
         The behavior during training and inference is different.
@@ -153,12 +152,16 @@ class RPN(gluon.HybridBlock):
             raw_rpn_boxes = F.concat(*raw_rpn_boxes, dim=1)
         else:
             x = x[0]
+            #print(x)
+            #print(type(x))
             anchors = self.anchor_generator(x)
             x = self.conv1(x)
-            raw_rpn_scores = self.score(x).transpose(axes=(0, 2, 3, 1)).reshape((0, -1, 1))
-            rpn_scores = F.sigmoid(F.stop_gradient(raw_rpn_scores))
-            raw_rpn_boxes = self.loc(x).transpose(axes=(0, 2, 3, 1)).reshape((0, -1, 4))
-            rpn_boxes = F.stop_gradient(raw_rpn_boxes)
+            print(type(self.score(x)))
+            raw_rpn_scores = self.score(x).transpose((0, 2, 3, 1)).reshape((1, -1, 1))
+            with mx.autograd.pause():
+                rpn_scores = mx.npx.sigmoid(raw_rpn_scores)
+                raw_rpn_boxes = self.loc(x).transpose((0, 2, 3, 1)).reshape((1, -1, 4))
+                rpn_boxes = raw_rpn_boxes
             rpn_pre_nms_proposals = self.region_proposer(
                 anchors, rpn_scores, rpn_boxes, img)
 
@@ -170,14 +173,18 @@ class RPN(gluon.HybridBlock):
                                         force_suppress=True)
             else:
                 # Non-maximum suppression
-                tmp = F.contrib.box_nms(rpn_pre_nms_proposals, overlap_thresh=self._nms_thresh,
+                tmp = mx.npx.box_nms(rpn_pre_nms_proposals, overlap_thresh=self._nms_thresh,
                                         topk=pre_nms, coord_start=1, score_index=0, id_index=-1,
                                         force_suppress=True)
 
             # slice post_nms number of boxes
-            result = F.slice_axis(tmp, axis=1, begin=0, end=post_nms)
-            rpn_scores = F.slice_axis(result, axis=-1, begin=0, end=1)
-            rpn_boxes = F.slice_axis(result, axis=-1, begin=1, end=None)
+            print(type(tmp))
+            idx = mx.np.arange(0,post_nms)
+            result = mx.np.take(tmp, indices=idx, axis=1)
+            idx = mx.np.arange(0,1)
+            rpn_scores = mx.np.take(result, axis=-1, indices=idx)
+            idx = mx.np.arange(1,mx.np.shape(result)[-1])
+            rpn_boxes = mx.np.take(result, axis=-1, indices=idx)
 
         if autograd.is_training():
             # return raw predictions as well in training for bp
@@ -203,18 +210,17 @@ class RPNHead(gluon.HybridBlock):
     def __init__(self, channels, anchor_depth, **kwargs):
         super(RPNHead, self).__init__(**kwargs)
         weight_initializer = mx.init.Normal(0.01)
-        with self.name_scope():
-            self.conv1 = nn.HybridSequential()
-            self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
-                           nn.Activation('relu'))
-            # use sigmoid instead of softmax, reduce channel numbers
-            # Note : that is to say, if use softmax here,
-            # then the self.score will anchor_depth*2 output channel
-            self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
-            self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0, weight_initializer=weight_initializer)
+        self.conv1 = nn.HybridSequential()
+        self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
+                       nn.Activation('relu'))
+        # use sigmoid instead of softmax, reduce channel numbers
+        # Note : that is to say, if use softmax here,
+        # then the self.score will anchor_depth*2 output channel
+        self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
+        self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0, weight_initializer=weight_initializer)
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Forward RPN Head.
 
         This HybridBlock will generate predicted values for cls and box.

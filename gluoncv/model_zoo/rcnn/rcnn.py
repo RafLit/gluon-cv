@@ -94,16 +94,15 @@ class RCNN(gluon.HybridBlock):
         self._roi_size = roi_size
         self._strides = strides
 
-        with self.name_scope():
-            self.features = features
-            self.top_features = top_features
-            self.box_features = box_features
-            self.class_predictor = nn.Dense(
-                self.num_class + 1, weight_initializer=mx.init.Normal(0.01))
-            self.box_predictor = nn.Dense(
-                self.num_class * 4, weight_initializer=mx.init.Normal(0.001))
-            self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
-            self.box_decoder = NormalizedBoxCenterDecoder(clip=clip, convert_anchor=True)
+        self.features = features
+        self.top_features = top_features
+        self.box_features = box_features
+        self.class_predictor = nn.Dense(
+            self.num_class + 1, weight_initializer=mx.init.Normal(0.01))
+        self.box_predictor = nn.Dense(
+            self.num_class * 4, weight_initializer=mx.init.Normal(0.001))
+        self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
+        self.box_decoder = NormalizedBoxCenterDecoder(clip=clip, convert_anchor=True)
 
     def collect_train_params(self, select=None):
         """Collect trainable params.
@@ -211,52 +210,50 @@ class RCNN(gluon.HybridBlock):
                         warnings.warn("{} not found in old: {} or new class names: {}".format(
                             x, old_classes, self.classes))
                 reuse_weights = new_map
+        old_class_pred = self.class_predictor
+        old_box_pred = self.box_predictor
+        ctx = list(old_class_pred.params.values())[0].list_ctx()
+        # to avoid deferred init, number of in_channels must be defined
+        in_units = list(old_class_pred.params.values())[0].shape[1]
+        self.class_predictor = nn.Dense(
+            self.num_class + 1, weight_initializer=mx.init.Normal(0.01),
+            prefix=self.class_predictor.prefix, in_units=in_units)
+        self.box_predictor = nn.Dense(
+            self.num_class * 4, weight_initializer=mx.init.Normal(0.001),
+            prefix=self.box_predictor.prefix, in_units=in_units)
+        self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
+        # initialize
+        self.class_predictor.initialize(ctx=ctx)
+        self.box_predictor.initialize(ctx=ctx)
+        if reuse_weights:
+            assert isinstance(reuse_weights, dict)
+            # class predictors
+            srcs = (old_class_pred, old_box_pred)
+            dsts = (self.class_predictor, self.box_predictor)
+            offsets = (1, 0)  # class predictor has bg, box don't
+            lens = (1, 4)  # class predictor length=1, box length=4
+            for src, dst, offset, l in zip(srcs, dsts, offsets, lens):
+                for old_params, new_params in zip(src.params.values(),
+                                                  dst.params.values()):
+                    # slice and copy weights
+                    old_data = old_params.data()
+                    new_data = new_params.data()
 
-        with self.name_scope():
-            old_class_pred = self.class_predictor
-            old_box_pred = self.box_predictor
-            ctx = list(old_class_pred.params.values())[0].list_ctx()
-            # to avoid deferred init, number of in_channels must be defined
-            in_units = list(old_class_pred.params.values())[0].shape[1]
-            self.class_predictor = nn.Dense(
-                self.num_class + 1, weight_initializer=mx.init.Normal(0.01),
-                prefix=self.class_predictor.prefix, in_units=in_units)
-            self.box_predictor = nn.Dense(
-                self.num_class * 4, weight_initializer=mx.init.Normal(0.001),
-                prefix=self.box_predictor.prefix, in_units=in_units)
-            self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)
-            # initialize
-            self.class_predictor.initialize(ctx=ctx)
-            self.box_predictor.initialize(ctx=ctx)
-            if reuse_weights:
-                assert isinstance(reuse_weights, dict)
-                # class predictors
-                srcs = (old_class_pred, old_box_pred)
-                dsts = (self.class_predictor, self.box_predictor)
-                offsets = (1, 0)  # class predictor has bg, box don't
-                lens = (1, 4)  # class predictor length=1, box length=4
-                for src, dst, offset, l in zip(srcs, dsts, offsets, lens):
-                    for old_params, new_params in zip(src.params.values(),
-                                                      dst.params.values()):
-                        # slice and copy weights
-                        old_data = old_params.data()
-                        new_data = new_params.data()
-
-                        for k, v in reuse_weights.items():
-                            if k >= len(self.classes) or v >= len(old_classes):
-                                warnings.warn("reuse mapping {}/{} -> {}/{} out of range".format(
-                                    k, self.classes, v, old_classes))
-                                continue
-                            new_data[(k+offset)*l:(k+offset+1)*l] = \
-                                old_data[(v+offset)*l:(v+offset+1)*l]
-                        # reuse background weights as well
-                        if offset > 0:
-                            new_data[0:l] = old_data[0:l]
-                        # set data to new conv layers
-                        new_params.set_data(new_data)
+                    for k, v in reuse_weights.items():
+                        if k >= len(self.classes) or v >= len(old_classes):
+                            warnings.warn("reuse mapping {}/{} -> {}/{} out of range".format(
+                                k, self.classes, v, old_classes))
+                            continue
+                        new_data[(k+offset)*l:(k+offset+1)*l] = \
+                            old_data[(v+offset)*l:(v+offset+1)*l]
+                    # reuse background weights as well
+                    if offset > 0:
+                        new_data[0:l] = old_data[0:l]
+                    # set data to new conv layers
+                    new_params.set_data(new_data)
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x, width, height):
+    def forward(self, x, width, height):
         """Not implemented yet."""
         raise NotImplementedError
 

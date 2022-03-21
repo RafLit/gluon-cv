@@ -28,7 +28,7 @@ class MaskTargetGenerator(gluon.HybridBlock):
         self._mask_size = mask_size
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, rois, gt_masks, matches, cls_targets):
+    def forward(self, rois, gt_masks, matches, cls_targets):
         """Handle B=self._num_image by a for loop.
         There is no way to know number of gt_masks.
 

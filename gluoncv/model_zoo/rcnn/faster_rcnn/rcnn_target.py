@@ -40,7 +40,7 @@ class RCNNTargetSampler(gluon.HybridBlock):
         self._max_num_gt = max_num_gt
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, rois, scores, gt_boxes):
+    def forward(self, rois, scores, gt_boxes):
         """Handle B=self._num_image by a for loop.
 
         Parameters
@@ -167,7 +167,7 @@ class RCNNTargetGenerator(gluon.HybridBlock):
             means=means, stds=stds)
 
     # pylint: disable=arguments-differ, unused-argument
-    def hybrid_forward(self, F, roi, samples, matches, gt_label, gt_box):
+    def forward(self, roi, samples, matches, gt_label, gt_box):
         """Components can handle batch images
 
         Parameters

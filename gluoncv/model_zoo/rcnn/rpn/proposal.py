@@ -36,7 +36,7 @@ class RPNProposal(gluon.HybridBlock):
         self._min_size = min_size
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, anchor, score, bbox_pred, img):
+    def forward(self, anchor, score, bbox_pred, img):
         """
         Generate proposals.
         """
@@ -52,7 +52,8 @@ class RPNProposal(gluon.HybridBlock):
             # by setting them to (-1, -1, -1, -1)
             # width = roi.slice_axis(axis=-1, begin=2, end=3)
             # height = roi.slice_axis(axis=-1, begin=3, end=None)
-            xmin, ymin, xmax, ymax = roi.split(axis=-1, num_outputs=4)
+            import mxnet as mx
+            xmin, ymin, xmax, ymax = mx.np.split(roi, axis=-1, indices_or_sections=4)
             width = xmax - xmin + 1.0
             height = ymax - ymin + 1.0
             # TODO:(zhreshold), there's im_ratio to handle here, but it requires
@@ -69,9 +70,9 @@ class RPNProposal(gluon.HybridBlock):
             # invalid = (axmin < 0) + (aymin < 0) + F.broadcast_greater(axmax, wrange) + \
             #    F.broadcast_greater(aymax, hrange)
             # avoid invalid anchors suppress anchors with 0 confidence
-            score = F.where(invalid, F.ones_like(invalid) * -1, score)
-            invalid = F.broadcast_axes(invalid, axis=2, size=4)
-            roi = F.where(invalid, F.ones_like(invalid) * -1, roi)
-
-            pre = F.concat(score, roi, dim=-1)
+            score = mx.np.where(invalid, mx.np.ones_like(invalid, dtype=mx.np.float32) * -1.,score)
+            invalid = mx.np.tile(invalid, reps=(1,1,4)) 
+            roi = mx.np.where(invalid, mx.np.ones_like(invalid, dtype=mx.np.float32) * -1, roi)
+            pre = mx.np.concatenate((score, roi), axis=-1)
+            print(pre)
             return pre

@@ -5,7 +5,7 @@ Losses are subclasses of gluon.loss.Loss which is a HybridBlock actually.
 from __future__ import absolute_import
 from mxnet import gluon
 from mxnet import nd
-from mxnet.gluon.loss import Loss, _apply_weighting, _reshape_like
+from mxnet.gluon.loss import Loss, _apply_weighting
 
 __all__ = ['FocalLoss', 'SSDMultiBoxLoss', 'YOLOV3Loss',
            'MixSoftmaxCrossEntropyLoss', 'ICNetLoss', 'MixSoftmaxCrossEntropyOHEMLoss',
@@ -182,7 +182,7 @@ class SSDMultiBoxLoss(gluon.Block):
             cls_loss = nd.where((pos + hard_negative) > 0, cls_loss, nd.zeros_like(cls_loss))
             cls_losses.append(nd.sum(cls_loss, axis=0, exclude=True) / max(1., num_pos_all))
 
-            bp = _reshape_like(nd, bp, bt)
+            bp = nd.reshape_like(bp, bt)
             box_loss = nd.abs(bp - bt)
             box_loss = nd.where(box_loss > self._rho, box_loss - 0.5 * self._rho,
                                 (0.5 / self._rho) * nd.square(box_loss))

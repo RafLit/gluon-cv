@@ -64,9 +64,10 @@ class BBoxCornerToCenter(gluon.HybridBlock):
         self._split = split
         self._axis = axis
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Hybrid forward"""
-        xmin, ymin, xmax, ymax = F.split(x, axis=self._axis, num_outputs=4)
+        import mxnet as mx
+        xmin, ymin, xmax, ymax = mx.np.split(x, axis=self._axis, indices_or_sections=4)
         # note that we do not have +1 here since our nms and box iou does not.
         # this is different that detectron.
         width = xmax - xmin
@@ -74,7 +75,7 @@ class BBoxCornerToCenter(gluon.HybridBlock):
         x = xmin + width * 0.5
         y = ymin + height * 0.5
         if not self._split:
-            return F.concat(x, y, width, height, dim=self._axis)
+            return mx.np.concat(x, y, width, height, dim=self._axis)
         else:
             return x, y, width, height
 
@@ -101,7 +102,7 @@ class BBoxCenterToCorner(gluon.HybridBlock):
         self._split = split
         self._axis = axis
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Hybrid forward"""
         x, y, w, h = F.split(x, axis=self._axis, num_outputs=4)
         hw = w * 0.5
@@ -136,7 +137,7 @@ class BBoxSplit(gluon.HybridBlock):
         self._axis = axis
         self._squeeze_axis = squeeze_axis
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         return F.split(x, axis=self._axis, num_outputs=4, squeeze_axis=self._squeeze_axis)
 
 
@@ -167,7 +168,7 @@ class BBoxArea(gluon.HybridBlock):
         else:
             raise ValueError("Unsupported format: {}. Use 'corner' or 'center'.".format(fmt))
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         _, _, width, height = self._pre(x)
         width = F.where(width > 0, width, F.zeros_like(width))
         height = F.where(height > 0, height, F.zeros_like(height))
@@ -203,7 +204,7 @@ class BBoxBatchIOU(gluon.HybridBlock):
         else:
             raise ValueError("Unsupported format: {}. Use 'corner' or 'center'.".format(fmt))
 
-    def hybrid_forward(self, F, a, b):
+    def forward(self, a, b):
         """Compute IOU for each batch
 
         Parameters
@@ -250,7 +251,7 @@ class BBoxClipToImage(gluon.HybridBlock):
     def __init__(self, **kwargs):
         super(BBoxClipToImage, self).__init__(**kwargs)
 
-    def hybrid_forward(self, F, x, img):
+    def forward(self, x, img):
         """If images are padded, must have additional inputs for clipping
 
         Parameters
@@ -263,8 +264,11 @@ class BBoxClipToImage(gluon.HybridBlock):
         (B, N, 4) Bounding box coordinates.
 
         """
-        x = F.maximum(x, 0.0)
+        import mxnet as mx
+        x = mx.np.maximum(x, 0.0)
         # window [B, 2] -> reverse hw -> tile [B, 4] -> [B, 1, 4], boxes [B, N, 4]
-        window = F.shape_array(img).slice_axis(axis=0, begin=2, end=None).expand_dims(0)
-        m = F.tile(F.reverse(window, axis=1), reps=(2,)).reshape((0, -4, 1, -1))
-        return F.broadcast_minimum(x, F.cast(m, dtype='float32'))
+        window = mx.np.expand_dims(mx.np.asarray(mx.np.shape(img)[2:], dtype=mx.np.float32),0)
+        print(window)
+        m = mx.np.tile(mx.np.flip(window, axis=1), reps=(2,)).reshape((1, 1, -1))
+        print(m)
+        return mx.np.minimum(x, m)

@@ -7,7 +7,7 @@ import warnings
 import mxnet as mx
 from mxnet import autograd
 from mxnet.gluon import nn
-from mxnet.gluon.contrib.nn import SyncBatchNorm
+from mxnet.gluon.nn import SyncBatchNorm
 
 from .rcnn_target import MaskTargetGenerator
 from ..faster_rcnn import FasterRCNN
@@ -38,30 +38,29 @@ class Mask(nn.HybridBlock):
         self._batch_images = batch_images
         self.classes = classes
         init = mx.init.Xavier(rnd_type='gaussian', factor_type='out', magnitude=2)
-        with self.name_scope():
-            if num_fcn_convs > 0:
-                self.deconv = nn.HybridSequential()
-                for _ in range(num_fcn_convs):
-                    self.deconv.add(
-                        nn.Conv2D(mask_channels, kernel_size=(3, 3), strides=(1, 1),
-                                  padding=(1, 1), weight_initializer=init))
-                    if norm_layer is not None and norm_layer is SyncBatchNorm:
-                        self.deconv.add(norm_layer(**norm_kwargs))
-                    self.deconv.add(nn.Activation('relu'))
+        if num_fcn_convs > 0:
+            self.deconv = nn.HybridSequential()
+            for _ in range(num_fcn_convs):
                 self.deconv.add(
-                    nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
-                                       padding=(0, 0), weight_initializer=init))
+                    nn.Conv2D(mask_channels, kernel_size=(3, 3), strides=(1, 1),
+                              padding=(1, 1), weight_initializer=init))
                 if norm_layer is not None and norm_layer is SyncBatchNorm:
                     self.deconv.add(norm_layer(**norm_kwargs))
-            else:
-                # this is for compatibility of older models.
-                self.deconv = nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
-                                                 padding=(0, 0), weight_initializer=init)
-            self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
-                                  weight_initializer=init)
+                self.deconv.add(nn.Activation('relu'))
+            self.deconv.add(
+                nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
+                                   padding=(0, 0), weight_initializer=init))
+            if norm_layer is not None and norm_layer is SyncBatchNorm:
+                self.deconv.add(norm_layer(**norm_kwargs))
+        else:
+            # this is for compatibility of older models.
+            self.deconv = nn.Conv2DTranspose(mask_channels, kernel_size=(2, 2), strides=(2, 2),
+                                             padding=(0, 0), weight_initializer=init)
+        self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
+                              weight_initializer=init)
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         """Forward Mask Head.
 
         The behavior during training and inference is different.
@@ -121,31 +120,30 @@ class Mask(nn.HybridBlock):
                         warnings.warn("{} not found in old: {} or new class names: {}".format(
                             x, old_classes, self.classes))
                 reuse_weights = new_map
-        with self.name_scope():
-            old_mask = self.mask
-            ctx = list(old_mask.params.values())[0].list_ctx()
-            # to avoid deferred init, number of in_channels must be defined
-            in_channels = list(old_mask.params.values())[0].shape[1]
-            init = mx.init.Xavier(rnd_type='gaussian', factor_type='out', magnitude=2)
-            self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
-                                  weight_initializer=init, in_channels=in_channels)
-            self.mask.initialize(ctx=ctx)
-            if reuse_weights:
-                assert isinstance(reuse_weights, dict)
-                for old_params, new_params in zip(old_mask.params.values(),
-                                                  self.mask.params.values()):
-                    # slice and copy weights
-                    old_data = old_params.data()
-                    new_data = new_params.data()
+        old_mask = self.mask
+        ctx = list(old_mask.params.values())[0].list_ctx()
+        # to avoid deferred init, number of in_channels must be defined
+        in_channels = list(old_mask.params.values())[0].shape[1]
+        init = mx.init.Xavier(rnd_type='gaussian', factor_type='out', magnitude=2)
+        self.mask = nn.Conv2D(len(classes), kernel_size=(1, 1), strides=(1, 1), padding=(0, 0),
+                              weight_initializer=init, in_channels=in_channels)
+        self.mask.initialize(ctx=ctx)
+        if reuse_weights:
+            assert isinstance(reuse_weights, dict)
+            for old_params, new_params in zip(old_mask.params.values(),
+                                              self.mask.params.values()):
+                # slice and copy weights
+                old_data = old_params.data()
+                new_data = new_params.data()
 
-                    for k, v in reuse_weights.items():
-                        if k >= len(self.classes) or v >= len(old_classes):
-                            warnings.warn("reuse mapping {}/{} -> {}/{} out of range".format(
-                                k, self.classes, v, old_classes))
-                            continue
-                        new_data[k:k + 1] = old_data[v:v + 1]
-                    # set data to new conv layers
-                    new_params.set_data(new_data)
+                for k, v in reuse_weights.items():
+                    if k >= len(self.classes) or v >= len(old_classes):
+                        warnings.warn("reuse mapping {}/{} -> {}/{} out of range".format(
+                            k, self.classes, v, old_classes))
+                        continue
+                    new_data[k:k + 1] = old_data[v:v + 1]
+                # set data to new conv layers
+                new_params.set_data(new_data)
 
 
 class MaskRCNN(FasterRCNN):
@@ -185,15 +183,14 @@ class MaskRCNN(FasterRCNN):
         if min(rpn_test_pre_nms, rpn_test_post_nms) < rcnn_max_dets:
             rcnn_max_dets = min(rpn_test_pre_nms, rpn_test_post_nms)
         self._rcnn_max_dets = rcnn_max_dets
-        with self.name_scope():
-            self.mask = Mask(self._batch_size, classes, mask_channels, num_fcn_convs=num_fcn_convs,
-                             norm_layer=norm_layer, norm_kwargs=norm_kwargs)
-            roi_size = (self._roi_size[0] * target_roi_scale, self._roi_size[1] * target_roi_scale)
-            self._target_roi_size = roi_size
-            self.mask_target = MaskTargetGenerator(
-                self._batch_size, self._num_sample, self.num_class, self._target_roi_size)
+        self.mask = Mask(self._batch_size, classes, mask_channels, num_fcn_convs=num_fcn_convs,
+                         norm_layer=norm_layer, norm_kwargs=norm_kwargs)
+        roi_size = (self._roi_size[0] * target_roi_scale, self._roi_size[1] * target_roi_scale)
+        self._target_roi_size = roi_size
+        self.mask_target = MaskTargetGenerator(
+            self._batch_size, self._num_sample, self.num_class, self._target_roi_size)
 
-    def hybrid_forward(self, F, x, gt_box=None, gt_label=None):
+    def forward(self, x, gt_box=None, gt_label=None):
         """Forward Mask RCNN network.
 
         The behavior during training and inference is different.
@@ -217,7 +214,7 @@ class MaskRCNN(FasterRCNN):
         if autograd.is_training():
             cls_pred, box_pred, rpn_box, samples, matches, raw_rpn_score, raw_rpn_box, anchors, \
             cls_targets, box_targets, box_masks, top_feat, indices = \
-                super(MaskRCNN, self).hybrid_forward(F, x, gt_box, gt_label)
+                super(MaskRCNN, self).forward(x, gt_box, gt_label)
             top_feat = F.reshape(top_feat.expand_dims(0), (self._batch_size, -1, 0, 0, 0))
             top_feat = F.concat(
                 *[F.take(F.slice_axis(top_feat, axis=0, begin=i, end=i + 1).squeeze(),
@@ -230,7 +227,7 @@ class MaskRCNN(FasterRCNN):
         else:
             batch_size = 1
             ids, scores, boxes, feat = \
-                super(MaskRCNN, self).hybrid_forward(F, x)
+                super(MaskRCNN, self).forward(x)
 
             # (B, N * (C - 1), 1) -> (B, N * (C - 1)) -> (B, topk)
             num_rois = self._rcnn_max_dets

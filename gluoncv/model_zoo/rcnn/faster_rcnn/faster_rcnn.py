@@ -6,7 +6,7 @@ import os
 import mxnet as mx
 from mxnet import autograd
 from mxnet.gluon import nn
-from mxnet.gluon.contrib.nn import SyncBatchNorm
+from mxnet.gluon.nn import SyncBatchNorm
 
 from .rcnn_target import RCNNTargetSampler, RCNNTargetGenerator
 from ..rcnn import custom_rcnn_fpn
@@ -205,18 +205,17 @@ class FasterRCNN(RCNN):
                                                          self._batch_size)
 
         self._additional_output = additional_output
-        with self.name_scope():
-            self.rpn = RPN(
-                channels=rpn_channel, strides=strides, base_size=base_size,
-                scales=scales, ratios=ratios, alloc_size=alloc_size,
-                clip=clip, nms_thresh=rpn_nms_thresh, train_pre_nms=rpn_train_pre_nms,
-                train_post_nms=rpn_train_post_nms, test_pre_nms=rpn_test_pre_nms,
-                test_post_nms=rpn_test_post_nms, min_size=rpn_min_size,
-                multi_level=self.num_stages > 1, per_level_nms=False)
-            self.sampler = RCNNTargetSampler(num_image=self._batch_size,
-                                             num_proposal=rpn_train_post_nms, num_sample=num_sample,
-                                             pos_iou_thresh=pos_iou_thresh, pos_ratio=pos_ratio,
-                                             max_num_gt=max_num_gt)
+        self.rpn = RPN(
+            channels=rpn_channel, strides=strides, base_size=base_size,
+            scales=scales, ratios=ratios, alloc_size=alloc_size,
+            clip=clip, nms_thresh=rpn_nms_thresh, train_pre_nms=rpn_train_pre_nms,
+            train_post_nms=rpn_train_post_nms, test_pre_nms=rpn_test_pre_nms,
+            test_post_nms=rpn_test_post_nms, min_size=rpn_min_size,
+            multi_level=self.num_stages > 1, per_level_nms=False)
+        self.sampler = RCNNTargetSampler(num_image=self._batch_size,
+                                         num_proposal=rpn_train_post_nms, num_sample=num_sample,
+                                         pos_iou_thresh=pos_iou_thresh, pos_ratio=pos_ratio,
+                                         max_num_gt=max_num_gt)
 
     @property
     def target_generator(self):
@@ -332,7 +331,7 @@ class FasterRCNN(RCNN):
         return pooled_roi_feats
 
     # pylint: disable=arguments-differ
-    def hybrid_forward(self, F, x, gt_box=None, gt_label=None):
+    def forward(self, x, gt_box=None, gt_label=None):
         """Forward Faster-RCNN network.
 
         The behavior during training and inference is different.
@@ -368,20 +367,19 @@ class FasterRCNN(RCNN):
         # RPN proposals
         if autograd.is_training():
             rpn_score, rpn_box, raw_rpn_score, raw_rpn_box, anchors = \
-                self.rpn(F.zeros_like(x), *feat)
+                self.rpn(mx.np.zeros_like(x), *feat)
             rpn_box, samples, matches = self.sampler(rpn_box, rpn_score, gt_box)
         else:
-            _, rpn_box = self.rpn(F.zeros_like(x), *feat)
+            _, rpn_box = self.rpn(mx.np.zeros_like(x), *feat)
 
         # create batchid for roi
         num_roi = self._num_sample if autograd.is_training() else self._rpn_test_post_nms
         batch_size = self._batch_size if autograd.is_training() else 1
         with autograd.pause():
-            roi_batchid = F.arange(0, batch_size)
-            roi_batchid = F.repeat(roi_batchid, num_roi)
+            roi_batchid = mx.np.arange(0, batch_size)
+            roi_batchid = mx.np.repeat(roi_batchid, num_roi)
             # remove batch dim because ROIPooling require 2d input
-            rpn_roi = F.concat(*[roi_batchid.reshape((-1, 1)), rpn_box.reshape((-1, 4))], dim=-1)
-            rpn_roi = F.stop_gradient(rpn_roi)
+            rpn_roi = mx.np.concatenate([roi_batchid.reshape((-1, 1)), rpn_box.reshape((-1, 4))], axis=-1)
 
         if self.num_stages > 1:
             # using FPN
@@ -392,8 +390,10 @@ class FasterRCNN(RCNN):
             if self._roi_mode == 'pool':
                 pooled_feat = F.ROIPooling(feat[0], rpn_roi, self._roi_size, 1. / self._strides)
             elif self._roi_mode == 'align':
-                pooled_feat = F.contrib.ROIAlign(feat[0], rpn_roi, self._roi_size,
-                                                 1. / self._strides, sample_ratio=2)
+                #TODORAV
+                pooled_feat = mx.nd.contrib.ROIAlign(feat[0].as_nd_ndarray(), rpn_roi.as_nd_ndarray(), self._roi_size,
+                                                1. / self._strides, sample_ratio=2)
+                pooled_feat = pooled_feat.as_np_ndarray()
             else:
                 raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
 
@@ -403,7 +403,7 @@ class FasterRCNN(RCNN):
         else:
             top_feat = pooled_feat
         if self.box_features is None:
-            box_feat = F.contrib.AdaptiveAvgPooling2D(top_feat, output_size=1)
+            box_feat = mx.nd.contrib.AdaptiveAvgPooling2D(top_feat.as_nd_ndarray(), output_size=1).as_np_ndarray()
         else:
             box_feat = self.box_features(top_feat)
         cls_pred = self.class_predictor(box_feat)
@@ -431,7 +431,7 @@ class FasterRCNN(RCNN):
         # box_pred (B * N, C * 4) -> (B, N, C, 4)
         box_pred = box_pred.reshape((batch_size, num_roi, self.num_class, 4))
         # cls_ids (B, N, C), scores (B, N, C)
-        cls_ids, scores = self.cls_decoder(F.softmax(cls_pred, axis=-1))
+        cls_ids, scores = self.cls_decoder(mx.npx.softmax(cls_pred, axis=-1))
         # cls_ids, scores (B, N, C) -> (B, C, N) -> (B, C, N, 1)
         cls_ids = cls_ids.transpose((0, 2, 1)).reshape((0, 0, 0, 1))
         scores = scores.transpose((0, 2, 1)).reshape((0, 0, 0, 1))
