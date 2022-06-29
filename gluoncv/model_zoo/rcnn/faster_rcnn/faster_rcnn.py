@@ -393,8 +393,9 @@ class FasterRCNN(RCNN):
             if self._roi_mode == 'pool':
                 pooled_feat = mx.npx.ROIPooling(feat[0], rpn_roi, self._roi_size, 1. / self._strides)
             elif self._roi_mode == 'align':
-                pooled_feat = mx.npx.ROIAlign(feat[0], rpn_roi, self._roi_size,
-                                                1. / self._strides, sample_ratio=2)
+
+                pooled_feat = mx.nd.contrib.ROIAlign(feat[0].as_nd_ndarray(), rpn_roi.as_nd_ndarray(), self._roi_size,
+                                                1. / self._strides, sample_ratio=2).as_np_ndarray()
             else:
                 raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
 
