@@ -103,8 +103,7 @@ class NormalizedBoxCenterEncoder(gluon.HybridBlock):
         assert len(means) == 4, "Box Encoder requires 4 std values."
         self._means = means
         self._stds = stds
-        with self.name_scope():
-            self.corner_to_center = BBoxCornerToCenter(split=True)
+        self.corner_to_center = BBoxCornerToCenter(split=True)
 
     # pylint: disable=arguments-differ
     def forward(self, samples, matches, anchors, refs):
@@ -175,11 +174,10 @@ class NormalizedPerClassBoxCenterEncoder(gluon.HybridBlock):
         self._num_class = num_class
         self._max_pos = max_pos
         self._batch_size = per_device_batch_size
-        with self.name_scope():
-            self.class_agnostic_encoder = NormalizedBoxCenterEncoder(stds=stds, means=means)
-            if 'box_encode' in nd.contrib.__dict__:
-                self.means = self.params.get_constant('means', means)
-                self.stds = self.params.get_constant('stds', stds)
+        self.class_agnostic_encoder = NormalizedBoxCenterEncoder(stds=stds, means=means)
+        from mxnet.gluon import Constant
+        self.means = Constant(means)
+        self.stds = Constant(stds)
 
     def forward(self, samples, matches, anchors, labels, refs, means=None, stds=None):
         """Encode BBox One entry per category
@@ -420,15 +418,12 @@ class MultiPerClassDecoder(gluon.HybridBlock):
         self._thresh = thresh
 
     def forward(self, x):
-        idx = mx.np.arange(1,mx.np.shape(x)[self._axis])
-        scores = x.take(axis=self._axis, indices=idx)  # b x N x fg_class
-        template = mx.np.zeros_like(x.take(axis=-1, indices=mx.np.array([0])))
-        print(template.shape)
-        cls_id = F.broadcast_add(template,
-                                 F.reshape(F.arange(self._fg_class), shape=(1, 1, self._fg_class)))
+        scores = mx.npx.slice(x, begin=(None,None,1), end=(None,None,None))  # b x N x fg_class
+        template = mx.np.zeros_like(mx.npx.slice(x, begin=(None,None,0), end=(None,None,1)))
+        cls_id = template+mx.np.reshape(mx.np.arange(self._fg_class), newshape=(1, 1, self._fg_class))
         mask = scores > self._thresh
-        cls_id = F.where(mask, cls_id, F.ones_like(cls_id) * -1)
-        scores = F.where(mask, scores, F.zeros_like(scores))
+        cls_id = mx.np.where(mask, cls_id, mx.np.ones_like(cls_id) * -1)
+        scores = mx.np.where(mask, scores, mx.np.zeros_like(scores))
         return cls_id, scores
 
 

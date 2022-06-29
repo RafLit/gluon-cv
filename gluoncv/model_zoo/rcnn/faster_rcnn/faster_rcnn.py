@@ -354,7 +354,10 @@ class FasterRCNN(RCNN):
         """
 
         def _split(x, axis, num_outputs, squeeze_axis):
-            x = F.split(x, axis=axis, num_outputs=num_outputs, squeeze_axis=squeeze_axis)
+            x = mx.np.split(x, axis=axis, indices_or_sections=num_outputs)
+            if squeeze_axis:
+                x = [mx.np.squeeze(xx, axis=axis) for xx in x]
+                
             if isinstance(x, list):
                 return x
             else:
@@ -388,12 +391,10 @@ class FasterRCNN(RCNN):
         else:
             # ROI features
             if self._roi_mode == 'pool':
-                pooled_feat = F.ROIPooling(feat[0], rpn_roi, self._roi_size, 1. / self._strides)
+                pooled_feat = mx.npx.ROIPooling(feat[0], rpn_roi, self._roi_size, 1. / self._strides)
             elif self._roi_mode == 'align':
-                #TODORAV
-                pooled_feat = mx.nd.contrib.ROIAlign(feat[0].as_nd_ndarray(), rpn_roi.as_nd_ndarray(), self._roi_size,
+                pooled_feat = mx.npx.ROIAlign(feat[0], rpn_roi, self._roi_size,
                                                 1. / self._strides, sample_ratio=2)
-                pooled_feat = pooled_feat.as_np_ndarray()
             else:
                 raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
 
@@ -433,8 +434,8 @@ class FasterRCNN(RCNN):
         # cls_ids (B, N, C), scores (B, N, C)
         cls_ids, scores = self.cls_decoder(mx.npx.softmax(cls_pred, axis=-1))
         # cls_ids, scores (B, N, C) -> (B, C, N) -> (B, C, N, 1)
-        cls_ids = cls_ids.transpose((0, 2, 1)).reshape((0, 0, 0, 1))
-        scores = scores.transpose((0, 2, 1)).reshape((0, 0, 0, 1))
+        cls_ids = mx.np.expand_dims(cls_ids.transpose((0, 2, 1)),axis= -1)
+        scores = mx.np.expand_dims(scores.transpose((0, 2, 1)),axis=-1)
         # box_pred (B, N, C, 4) -> (B, C, N, 4)
         box_pred = box_pred.transpose((0, 2, 1, 3))
 
@@ -452,23 +453,23 @@ class FasterRCNN(RCNN):
             # box_pred (C, N, 4) rpn_box (1, N, 4) -> bbox (C, N, 4)
             bbox = self.box_decoder(box_pred, rpn_box)
             # res (C, N, 6)
-            res = F.concat(*[cls_id, score, bbox], dim=-1)
+            res = mx.np.concatenate([cls_id, score, bbox], axis=-1)
             if self.force_nms:
                 # res (1, C*N, 6), to allow cross-catogory suppression
-                res = res.reshape((1, -1, 0))
+                res = res.reshape((1, -1, res.shape[-1]))
             # res (C, self.nms_topk, 6)
-            res = F.contrib.box_nms(
+            res = mx.npx.box_nms(
                 res, overlap_thresh=self.nms_thresh, topk=self.nms_topk, valid_thresh=0.0001,
                 id_index=0, score_index=1, coord_start=2, force_suppress=self.force_nms)
             # res (C * self.nms_topk, 6)
-            res = res.reshape((-3, 0))
+            res = res.reshape((-1, res.shape[-1]))
             results.append(res)
 
         # result B * (C * topk, 6) -> (B, C * topk, 6)
-        result = F.stack(*results, axis=0)
-        ids = F.slice_axis(result, axis=-1, begin=0, end=1)
-        scores = F.slice_axis(result, axis=-1, begin=1, end=2)
-        bboxes = F.slice_axis(result, axis=-1, begin=2, end=6)
+        result = mx.np.stack(results, axis=0)
+        ids = mx.npx.slice(result, begin=(None,None,0), end=(None,None,1))
+        scores = mx.npx.slice(result, begin=(None,None,1), end=(None,None,2))
+        bboxes = mx.npx.slice(result, begin=(None,None,2), end=(None,None,6))
         if self._additional_output:
             return ids, scores, bboxes, feat
         return ids, scores, bboxes

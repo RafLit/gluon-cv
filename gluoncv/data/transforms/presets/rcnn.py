@@ -344,9 +344,10 @@ class MaskRCNNDefaultTrainTransform(object):
         anchors = []  # [P2, P3, P4, P5]
         # in case network has reset_ctx to gpu
         anchor_generator = copy.deepcopy(net.rpn.anchor_generator)
-        anchor_generator.collect_params().reset_ctx(None)
+        anchor_generator.reset_device(None)
         if self._multi_stage:
             for ag in anchor_generator:
+                
                 anchor = ag(mx.nd.zeros((1, 3, ashape, ashape))).reshape((1, 1, ashape, ashape, -1))
                 ashape = max(ashape // 2, 16)
                 anchors.append(anchor)
@@ -466,6 +467,6 @@ class MaskRCNNDefaultValTransform(object):
         # no scaling ground-truth, return image scaling ratio instead
         im_scale = float(img.shape[0]) / h
 
-        img = mx.nd.image.to_tensor(img)
-        img = mx.nd.image.normalize(img, mean=self._mean, std=self._std)
-        return img, mx.nd.array([img.shape[-2], img.shape[-1], im_scale])
+        img = mx.npx.image.to_tensor(img)
+        img = mx.npx.image.normalize(img, mean=self._mean, std=self._std)
+        return img, mx.np.array([img.shape[-2], img.shape[-1], im_scale])

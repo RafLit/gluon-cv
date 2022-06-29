@@ -97,7 +97,7 @@ def _append_arrs(arrs, use_shared_mem=False, expand=False, batch_axis=0):
 
     # add batch axis
     if expand:
-        out = [x.expand_dims(axis=batch_axis) for x in out]
+        out = [mx.np.expand_dims(x,axis=batch_axis) for x in out]
     return out
 
 
@@ -393,7 +393,7 @@ class FasterRCNNTrainBatchify(object):
     """
 
     def __init__(self, net, num_shards=1):
-        self._feat_sym = net.features(mx.sym.var(name='data'))
+        self._feat_sym = net.features
         self._num_shards = num_shards
         self._img_pad = Pad(axis=(1, 2), num_shards=num_shards, ret_length=False)
         self._label_pad = Pad(pad_val=-1, num_shards=num_shards, ret_length=False)
@@ -465,7 +465,7 @@ class MaskRCNNTrainBatchify(object):
     """
 
     def __init__(self, net, num_shards=1):
-        self._feat_sym = net.features(mx.sym.var(name='data'))
+        self._feat_sym = net.features
         self._num_shards = num_shards
         self._faster_batchify = FasterRCNNTrainBatchify(net, num_shards)
         self._mask_pad = Pad(axis=(0, 1, 2), pad_val=0, num_shards=num_shards, ret_length=False)

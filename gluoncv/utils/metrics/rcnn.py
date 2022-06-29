@@ -32,7 +32,7 @@ class RPNAccMetric(EvalMetric):
         self.num_inst += num_inst.asscalar()
 
 
-class RPNL1LossMetric(mx.metric.EvalMetric):
+class RPNL1LossMetric(EvalMetric):
     """ RPN L1 loss. """
 
     def __init__(self):
@@ -56,7 +56,7 @@ class RPNL1LossMetric(mx.metric.EvalMetric):
         self.num_inst += num_inst.asscalar()
 
 
-class RCNNAccMetric(mx.metric.EvalMetric):
+class RCNNAccMetric(EvalMetric):
     """ RCNN accuracy. """
 
     def __init__(self):
@@ -77,7 +77,7 @@ class RCNNAccMetric(mx.metric.EvalMetric):
         self.num_inst += rcnn_label.size
 
 
-class RCNNL1LossMetric(mx.metric.EvalMetric):
+class RCNNL1LossMetric(EvalMetric):
     """ RCNN L1 loss. """
 
     def __init__(self):
@@ -101,7 +101,7 @@ class RCNNL1LossMetric(mx.metric.EvalMetric):
         self.num_inst += num_inst.asscalar()
 
 
-class MaskAccMetric(mx.metric.EvalMetric):
+class MaskAccMetric(EvalMetric):
     """ RCNN mask branch accuracy. """
 
     def __init__(self):
@@ -127,7 +127,7 @@ class MaskAccMetric(mx.metric.EvalMetric):
         self.num_inst += num_inst.asscalar()
 
 
-class MaskFGAccMetric(mx.metric.EvalMetric):
+class MaskFGAccMetric(EvalMetric):
     """ RCNN mask branch foreground accuracy. """
 
     def __init__(self):

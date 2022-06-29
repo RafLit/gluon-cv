@@ -267,8 +267,6 @@ class BBoxClipToImage(gluon.HybridBlock):
         import mxnet as mx
         x = mx.np.maximum(x, 0.0)
         # window [B, 2] -> reverse hw -> tile [B, 4] -> [B, 1, 4], boxes [B, N, 4]
-        window = mx.np.expand_dims(mx.np.asarray(mx.np.shape(img)[2:], dtype=mx.np.float32),0)
-        print(window)
+        window = mx.np.expand_dims(mx.npx.shape_array(img)[2:],0).astype('float32')
         m = mx.np.tile(mx.np.flip(window, axis=1), reps=(2,)).reshape((1, 1, -1))
-        print(m)
         return mx.np.minimum(x, m)

@@ -77,11 +77,11 @@ class Mask(nn.HybridBlock):
 
         """
         # (B * N, mask_channels, MS, MS)
-        x = F.relu(self.deconv(x))
+        x = mx.npx.relu(self.deconv(x))
         # (B * N, C, MS, MS)
         x = self.mask(x)
         # (B * N, C, MS, MS) -> (B, N, C, MS, MS)
-        x = x.reshape((-4, self._batch_images, -1, 0, 0, 0))
+        x = x.reshape((self._batch_images, -1, x.shape[1], x.shape[2], x.shape[3]))
         return x
 
     def reset_class(self, classes, reuse_weights=None):
@@ -231,21 +231,22 @@ class MaskRCNN(FasterRCNN):
 
             # (B, N * (C - 1), 1) -> (B, N * (C - 1)) -> (B, topk)
             num_rois = self._rcnn_max_dets
-            order = F.argsort(scores.squeeze(axis=-1), axis=1, is_ascend=False)
-            topk = F.slice_axis(order, axis=1, begin=0, end=num_rois)
+            order = mx.np.flip(mx.np.argsort(scores.squeeze(axis=-1), axis=1), axis=1)
+            topk = mx.npx.slice(order, begin=(None,0), end=(None,num_rois))
 
             # pick from (B, N * (C - 1), X) to (B * topk, X) -> (B, topk, X)
             # roi_batch_id = F.arange(0, self._max_batch, repeat=num_rois)
-            roi_batch_id = F.arange(0, batch_size)
-            roi_batch_id = F.repeat(roi_batch_id, num_rois)
-            indices = F.stack(roi_batch_id, topk.reshape((-1,)), axis=0)
-            ids = F.gather_nd(ids, indices).reshape((-4, batch_size, num_rois, 1))
-            scores = F.gather_nd(scores, indices).reshape((-4, batch_size, num_rois, 1))
-            boxes = F.gather_nd(boxes, indices).reshape((-4, batch_size, num_rois, 4))
+            roi_batch_id = mx.np.arange(0, batch_size)
+            roi_batch_id = mx.np.repeat(roi_batch_id, num_rois)
+            indices = mx.np.stack((roi_batch_id, topk.reshape((-1,)).astype(mx.np.float32)), axis=0)
+
+            ids = mx.npx.gather_nd(ids, indices).reshape((batch_size, num_rois, 1))
+            scores = mx.npx.gather_nd(scores, indices).reshape((batch_size, num_rois, 1))
+            boxes = mx.npx.gather_nd(boxes, indices).reshape((batch_size, num_rois, 4))
 
             # create batch id and reshape for roi pooling
-            padded_rois = F.concat(roi_batch_id.reshape((-1, 1)), boxes.reshape((-3, 0)), dim=-1)
-            padded_rois = F.stop_gradient(padded_rois)
+            padded_rois = mx.np.concatenate((roi_batch_id.reshape((-1, 1)), boxes.reshape((-1, boxes.shape[2]))), axis=-1)
+            padded_rois = mx.npx.stop_gradient(padded_rois)
 
             # pool to roi features
             if self.num_stages > 1:
@@ -254,10 +255,11 @@ class MaskRCNN(FasterRCNN):
                                                       self._strides, roi_mode=self._roi_mode)
             else:
                 if self._roi_mode == 'pool':
-                    pooled_feat = F.ROIPooling(
+                    pooled_feat = mx.npx.ROIPooling(
                         feat[0], padded_rois, self._roi_size, 1. / self._strides)
                 elif self._roi_mode == 'align':
-                    pooled_feat = F.contrib.ROIAlign(
+
+                    pooled_feat = mx.npx.ROIAlign(
                         feat[0], padded_rois, self._roi_size, 1. / self._strides, sample_ratio=2)
                 else:
                     raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
@@ -271,21 +273,21 @@ class MaskRCNN(FasterRCNN):
             rcnn_mask = self.mask(top_feat)
             # index the B dimension (B * N,)
             # batch_ids = F.arange(0, self._max_batch, repeat=num_rois)
-            batch_ids = F.arange(0, batch_size)
-            batch_ids = F.repeat(batch_ids, num_rois)
+            batch_ids = mx.np.arange(0, batch_size)
+            batch_ids = mx.np.repeat(batch_ids, num_rois)
             # index the N dimension (B * N,)
-            roi_ids = F.tile(F.arange(0, num_rois), reps=batch_size)
+            roi_ids = mx.np.tile(mx.np.arange(0, num_rois), reps=batch_size)
             # index the C dimension (B * N,)
             class_ids = ids.reshape((-1,))
             # clip to 0 to max class
-            class_ids = F.clip(class_ids, 0, self.num_class)
+            class_ids = mx.np.clip(class_ids, 0, self.num_class)
             # pick from (B, N, C, PS*2, PS*2) -> (B * N, PS*2, PS*2)
-            indices = F.stack(batch_ids, roi_ids, class_ids, axis=0)
-            masks = F.gather_nd(rcnn_mask, indices)
+            indices = mx.np.stack((batch_ids, roi_ids, class_ids), axis=0)
+            masks = mx.npx.gather_nd(rcnn_mask, indices)
             # (B * N, PS*2, PS*2) -> (B, N, PS*2, PS*2)
-            masks = masks.reshape((-4, batch_size, num_rois, 0, 0))
+            masks = masks.reshape((batch_size, num_rois, masks.shape[1], masks.shape[2]))
             # output prob
-            masks = F.sigmoid(masks)
+            masks = mx.npx.sigmoid(masks)
 
             # ids (B, N, 1), scores (B, N, 1), boxes (B, N, 4), masks (B, N, PS*2, PS*2)
             return ids, scores, boxes, masks
