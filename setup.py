@@ -38,12 +38,7 @@ def find_version(*file_paths):
     raise RuntimeError("Unable to find version string.")
 
 
-try:
-    import pypandoc
-
-    long_description = pypandoc.convert('README.md', 'rst')
-except(IOError, ImportError):
-    long_description = open('README.md').read()
+long_description = open('README.md').read()
 
 VERSION = find_version('gluoncv', '__init__.py')
 
