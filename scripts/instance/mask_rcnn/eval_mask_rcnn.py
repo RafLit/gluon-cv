@@ -127,6 +127,7 @@ if __name__ == '__main__':
 
     # training contexts
     ctx = [mx.gpu(int(i)) for i in args.gpus.split(',') if i.strip()]
+    ctx = None
     ctx = ctx if ctx else [mx.cpu()]
     args.batch_size = len(ctx)  # 1 batch per device
 
@@ -141,7 +142,7 @@ if __name__ == '__main__':
     else:
         net = gcv.model_zoo.get_model(net_name, pretrained=False)
         net.load_parameters(args.pretrained.strip(), cast_dtype=True)
-    net.collect_params().reset_ctx(ctx)
+    net.reset_device(ctx)
 
     # training data
     val_dataset, eval_metric = get_dataset(args.dataset, args)
