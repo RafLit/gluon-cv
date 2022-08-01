@@ -353,6 +353,7 @@ class FasterRCNN(RCNN):
 
         def _split(x, axis, num_outputs, squeeze_axis):
             x = F.split(x, axis=axis, num_outputs=num_outputs, squeeze_axis=squeeze_axis)
+            return x
             if isinstance(x, list):
                 return x
             else:
@@ -372,7 +373,7 @@ class FasterRCNN(RCNN):
 
         # create batchid for roi
         num_roi = self._num_sample if autograd.is_training() else self._rpn_test_post_nms
-        batch_size = self._batch_size if autograd.is_training() else 1
+        batch_size = self._batch_size
         with autograd.pause():
             roi_batchid = F.arange(0, batch_size)
             roi_batchid = F.repeat(roi_batchid, num_roi)

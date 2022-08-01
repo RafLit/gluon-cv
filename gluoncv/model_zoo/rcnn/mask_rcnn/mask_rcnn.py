@@ -86,7 +86,7 @@ class Mask(nn.HybridBlock):
             x = x.reshape((-4, self._batch_images, -1, 0, 0, 0))
         else:
             # always use batch_size = 1 for inference
-            x = x.reshape((-4, 1, -1, 0, 0, 0))
+            x = x.reshape((-4, self._batch_images, -1, 0, 0, 0))
         return x
 
     def reset_class(self, classes, reuse_weights=None):
@@ -232,7 +232,7 @@ class MaskRCNN(FasterRCNN):
             return cls_pred, box_pred, mask_pred, rpn_box, samples, matches, raw_rpn_score, \
                    raw_rpn_box, anchors, cls_targets, box_targets, box_masks, indices
         else:
-            batch_size = 1
+            batch_size = self._batch_size 
             ids, scores, boxes, feat = \
                 super(MaskRCNN, self).hybrid_forward(F, x)
 
